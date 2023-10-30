@@ -1,56 +1,70 @@
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdio.h>
 
-#define NUM_LEITORES 5
-#define NUM_ESCRITORES 5
-
-pthread_rwlock_t lock;
+sem_t mutex;
+sem_t db;
+int contador_leitor = 0;
 
 void *leitor(void *arg) {
-    int id = *((int *)arg);
-    pthread_rwlock_rdlock(&lock);
-    printf("Leitor %d está lendo\n", id);
-    sleep(1);
-    printf("Leitor %d terminou de ler\n", id);
-    pthread_rwlock_unlock(&lock);
+  int f;
+  f = ((int)arg);
+  sem_wait(&mutex); // espera pelo mutex (bloqueia o acesso a região crítica))
+  contador_leitor = contador_leitor + 1;
+
+  if (contador_leitor == 1)
+    sem_wait(
+        &db); // o primeiro leitor bloqueia o acesso para todos os escritores
+
+  sem_post(&mutex); // libera o mutex permitindo que os outros leitores alterem
+                    // o contador de leitores
+
+  printf("Leitor %d lê\n", f);
+  sleep(1); // simulando leitura
+  printf("Leitor %d para de ler\n", f);
+
+  sem_wait(&mutex); // solicita o mutex para decrementar o numero de leitores
+
+  contador_leitor = contador_leitor - 1;
+
+  if (contador_leitor == 0)
+    sem_post(
+        &db); // o último leitor desbloqueia o acesso para todos os escritores
+
+  sem_post(&mutex); // leitor libera o mutex para permitir que outros leitores
+                    // alterem o contador
 }
 
 void *escritor(void *arg) {
-    int id = *((int *)arg);
-    printf("Escritor %d está esperando para escrever\n", id);
-    pthread_rwlock_wrlock(&lock);
-    printf("Escritor %d está escrevendo\n", id);
-    sleep(1);
-    pthread_rwlock_unlock(&lock);
-    printf("Escritor %d terminou de escrever\n", id);
+  int f;
+  f = ((int)arg);
+  printf("Escritor %d quer escrever\n", f);
+  sem_wait(
+      &db); // solicita acesso ao db (bloqueia para todos leitores e escritores)
+  printf("Escritor %d escreve\n", f);
+  sleep(1); // simulando escrita
+  printf("Escritor %d para de escrever\n", f);
+  sem_post(&db); // libera o db
 }
 
 int main() {
-    pthread_t r[NUM_LEITORES], w[NUM_ESCRITORES];
-    int i, id[NUM_LEITORES + NUM_ESCRITORES];
+  int i, b;
+  pthread_t rtid[5],
+      wtid[5]; // arrays para armazenar os IDs das threads leitoras e escritoras
 
-    pthread_rwlock_init(&lock, NULL);
+  sem_init(&mutex, 0, 1);
+  sem_init(&db, 0, 1);
 
-    for (i = 0; i < NUM_LEITORES; i++) {
-        id[i] = i;
-        pthread_create(&r[i], NULL, leitor, &id[i]);
-    }
+  // cria as threads leitoras e escritoras
 
-    for (i = 0; i < NUM_ESCRITORES; i++) {
-        id[i+NUM_LEITORES] = i;
-        pthread_create(&w[i], NULL, escritor, &id[i+NUM_LEITORES]);
-    }
-
-    for (i = 0; i < NUM_LEITORES; i++) {
-        pthread_join(r[i], NULL);
-    }
-
-    for (i = 0; i < NUM_ESCRITORES; i++) {
-        pthread_join(w[i], NULL);
-    }
-
-    pthread_rwlock_destroy(&lock);
-
-    return 0;
+  for (i = 0; i <= 2; i++) {
+    pthread_create(&wtid[i], NULL, escritor, (void *)i);
+    pthread_create(&rtid[i], NULL, leitor, (void *)i);
+    pthread_create(&rtid[i + 3], NULL, leitor, (void *)(i + 3));
+    pthread_create(&wtid[i + 3], NULL, escritor, (void *)(i + 3));
+    pthread_join(wtid[i], NULL);
+    pthread_join(rtid[i], NULL);
+    pthread_join(rtid[i + 3], NULL);
+    pthread_join(wtid[i + 3], NULL);
+  }
 }
-
